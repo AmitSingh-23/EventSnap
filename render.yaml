@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: eventsnap-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm ci --legacy-peer-deps && npm run weights
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: MONGO_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+  - type: worker
+    name: eventsnap-worker
+    runtime: node
+    rootDir: server
+    buildCommand: npm ci --legacy-peer-deps && npm run weights
+    startCommand: npm run worker
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: MONGO_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false
