@@ -17,9 +17,27 @@ const storage = new CloudinaryStorage({
   }
 });
 
-const upload = multer({ storage: storage });
+// Only accept images, and cap the size of each file, so the upload route cannot
+// be used to store arbitrary or oversized files.
+const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 MB per photo
+const ALLOWED_TYPES = ['image/jpeg', 'image/png']; // matches Cloudinary allowed_formats
+
+function imageFileFilter(req, file, cb) {
+  if (ALLOWED_TYPES.includes(file.mimetype)) return cb(null, true);
+  const err = new Error('Only JPEG and PNG images are allowed');
+  err.status = 400;
+  return cb(err);
+}
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: MAX_FILE_SIZE, files: 50 },
+  fileFilter: imageFileFilter
+});
 
 module.exports = {
   cloudinary,
-  upload
+  upload,
+  imageFileFilter,
+  MAX_FILE_SIZE
 };
