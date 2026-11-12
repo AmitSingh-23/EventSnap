@@ -1,6 +1,6 @@
 # EventSnap
 
-EventSnap helps photographers turn a massive event photo dump into private, easily shareable galleries. It detects faces, automatically groups photos by person, and generates direct gallery links that photographers can share with attendees.
+EventSnap helps photographers turn a massive event photo dump into per-person, easily shareable galleries. It detects faces, automatically groups photos by person, and generates direct gallery links that photographers can share with attendees.
 
 ## What it includes
 
@@ -68,6 +68,7 @@ VITE_API_URL=http://localhost:5000
    npm install
    npm run weights
    ```
+   `server/.npmrc` sets `legacy-peer-deps`, because `multer-storage-cloudinary` still declares a peer dependency on Cloudinary v1. Without it `npm install` stops with an `ERESOLVE` error.
 3. Install client dependencies:
    ```bash
    cd ../client
@@ -99,13 +100,35 @@ DBSCAN was chosen over k-means because event photo groupings are highly variable
 ### Async Job Queue
 Processing 100+ high-resolution photos for face detection is CPU-intensive. Doing this synchronously in the Express request handler would cause timeouts and block the event loop for other users. BullMQ + Redis provides robust retries, failure handling, and offloads heavy computation to a separate worker process.
 
-## Privacy & Ethics
-**Disclaimer**: This is a portfolio piece. Any production version handling biometric data must adhere strictly to GDPR and local privacy laws.
-- **Consent**: Explicit consent checkboxes must be added before capturing or processing group photos.
-- **Data Retention**: A production system should auto-delete photos and embeddings after a predefined window (e.g., 7 days post-event).
-- **Security**: Embeddings are irreversible, meaning original faces cannot easily be synthesized from the 128-d arrays, but standard DB encryption practices must be maintained.
+## Tests
+
+The clustering logic (`server/clustering.js`) and the upload file filter have unit tests:
+
+```bash
+cd server
+npm test        # 11 tests, Node's built-in test runner
+```
+
+They run in GitHub Actions on every push, alongside the client lint and build. There are no API or end-to-end tests yet; those need MongoDB and Redis.
+
+## Privacy and security
+
+EventSnap processes faces, which are biometric data. This is a portfolio project and is **not ready for real events** as it stands. What the code does today, and what is missing:
+
+| Area | Current state |
+| --- | --- |
+| Face embeddings | Stored in MongoDB as plain 128-number arrays next to each photo. They are not encrypted and are **not anonymous**: an embedding can be matched against other photos of the same person, and research has shown faces can be approximately reconstructed from embeddings. Treat them like the photos themselves. |
+| Consent | Not collected. A real deployment needs the organiser's and attendees' consent before any face processing. |
+| Access control | None. There are no accounts. Anyone who has an event ID or a gallery link can read it. |
+| Share links | A gallery link contains the cluster's MongoDB ID. That ID is hard to guess by accident but is not a secret token, and links never expire. |
+| Retention and deletion | Nothing is deleted automatically, and there is no endpoint to delete an event, a photo or a person's gallery. Re-running clustering replaces the old clusters only. |
+| Uploads | JPEG and PNG only, 15 MB per file, 50 files per request. The upload and clustering routes are limited to 30 requests per 15 minutes per IP. Photos are stored on Cloudinary under your account. |
+| Transport and origin | CORS is restricted to `CLIENT_URL`. HTTPS depends on the host. |
+
+Before using this with real people it would need, at minimum: consent capture, organiser authentication, random expiring share tokens, a delete endpoint with a retention window, and encryption at rest for embeddings.
 
 ## What I'd add with more time
+- Random, expiring share tokens and a delete endpoint (see Privacy and security).
 - Automated email delivery of share links.
 - A custom-trained or heavier face embedding model (like ArcFace or AdaFace) for better accuracy in challenging lighting.
 - High-performance vector database (e.g., Qdrant or Milvus) to scale matching when clustering thousands of events.

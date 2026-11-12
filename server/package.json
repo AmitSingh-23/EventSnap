@@ -8,7 +8,8 @@
     "dev": "nodemon index.js",
     "worker": "node worker.js",
     "worker:dev": "nodemon worker.js",
-    "weights": "node download-weights.js"
+    "weights": "node download-weights.js",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",

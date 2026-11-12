@@ -23,6 +23,16 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Uploads and clustering are the expensive routes (Cloudinary storage, face
+// detection jobs, DBSCAN), so they are rate-limited per client IP.
+const heavyRouteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' }
+});
+
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/ai-event-photos')
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB connection error:', err));
@@ -49,7 +59,7 @@ app.post('/api/events', [
   }
 });
 
-app.post('/api/events/:eventId/photos', upload.array('photos', 50), async (req, res) => {
+app.post('/api/events/:eventId/photos', heavyRouteLimiter, upload.array('photos', 50), async (req, res) => {
   try {
     const { eventId } = req.params;
     const event = await Event.findById(eventId);
@@ -98,29 +108,9 @@ app.get('/api/events/:eventId/status', async (req, res) => {
   }
 });
 
-const { DBSCAN } = require('density-clustering');
+const { clusterEmbeddings, calculateCentroid } = require('./clustering');
 
-// DBSCAN epsilon threshold (distance threshold for face embeddings).
-// Using Euclidean distance for 128-dimensional face-api.js embeddings.
-// May need tuning based on the exact face embedding model and environment.
-const DBSCAN_EPSILON = 0.55;
-const DBSCAN_MINPTS = 1;
-
-function euclideanDistance(a, b) {
-  return Math.sqrt(a.reduce((sum, val, i) => sum + Math.pow(val - b[i], 2), 0));
-}
-
-function calculateCentroid(points) {
-  if (points.length === 0) return [];
-  const dims = points[0].length;
-  const centroid = new Array(dims).fill(0);
-  for (const p of points) {
-    for (let i = 0; i < dims; i++) centroid[i] += p[i];
-  }
-  return centroid.map(v => v / points.length);
-}
-
-app.post('/api/events/:eventId/cluster', async (req, res) => {
+app.post('/api/events/:eventId/cluster', heavyRouteLimiter, async (req, res) => {
   try {
     const { eventId } = req.params;
     
@@ -156,9 +146,8 @@ app.post('/api/events/:eventId/cluster', async (req, res) => {
     // Reset clusterIds in all photos for this event
     await Photo.updateMany({ eventId }, { $set: { "faces.$[].clusterId": null } });
 
-    const dbscan = new DBSCAN();
-    // Run DBSCAN
-    const clusters = dbscan.run(dataset, DBSCAN_EPSILON, DBSCAN_MINPTS, euclideanDistance);
+    // Group faces by person with DBSCAN (see clustering.js)
+    const clusters = clusterEmbeddings(dataset);
 
     const createdClusters = [];
     const sharp = require('sharp');
@@ -329,6 +318,18 @@ app.get('/api/clusters/:clusterId/gallery', async (req, res) => {
 
 // Health Check
 app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
+
+// Turn upload rejections (wrong file type, file too large, too many files)
+// into clear 4xx JSON responses instead of a generic 500.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err && err.name === 'MulterError') {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    return res.status(status).json({ error: err.message });
+  }
+  if (err && err.status === 400) return res.status(400).json({ error: err.message });
+  return next(err);
+});
 
 const PORT = process.env.PORT || 5000;
 
