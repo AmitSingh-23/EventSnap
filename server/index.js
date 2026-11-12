@@ -23,6 +23,16 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Uploads and clustering are the expensive routes (Cloudinary storage, face
+// detection jobs, DBSCAN), so they are rate-limited per client IP.
+const heavyRouteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' }
+});
+
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/ai-event-photos')
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB connection error:', err));
@@ -49,7 +59,7 @@ app.post('/api/events', [
   }
 });
 
-app.post('/api/events/:eventId/photos', upload.array('photos', 50), async (req, res) => {
+app.post('/api/events/:eventId/photos', heavyRouteLimiter, upload.array('photos', 50), async (req, res) => {
   try {
     const { eventId } = req.params;
     const event = await Event.findById(eventId);
@@ -100,7 +110,7 @@ app.get('/api/events/:eventId/status', async (req, res) => {
 
 const { clusterEmbeddings, calculateCentroid } = require('./clustering');
 
-app.post('/api/events/:eventId/cluster', async (req, res) => {
+app.post('/api/events/:eventId/cluster', heavyRouteLimiter, async (req, res) => {
   try {
     const { eventId } = req.params;
     
@@ -308,6 +318,18 @@ app.get('/api/clusters/:clusterId/gallery', async (req, res) => {
 
 // Health Check
 app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
+
+// Turn upload rejections (wrong file type, file too large, too many files)
+// into clear 4xx JSON responses instead of a generic 500.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err && err.name === 'MulterError') {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    return res.status(status).json({ error: err.message });
+  }
+  if (err && err.status === 400) return res.status(400).json({ error: err.message });
+  return next(err);
+});
 
 const PORT = process.env.PORT || 5000;
 
