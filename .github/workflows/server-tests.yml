@@ -1,0 +1,28 @@
+name: Server tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      # The unit tests cover pure clustering logic, so the native TensorFlow and
+      # canvas binaries are not needed; skipping install scripts keeps this fast.
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: node --check index.js && node --check worker.js
