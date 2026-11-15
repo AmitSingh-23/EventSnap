@@ -334,8 +334,9 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 app.use((err, req, res, next) => {
-  console.error('GLOBAL ERROR CAUGHT:', err);
-  res.status(500).json({ error: err.message || 'Internal Server Error', details: err });
+  console.error('Unhandled error:', err);
+  // Log the details on the server only; never send internal errors to clients.
+  res.status(500).json({ error: 'Internal Server Error' });
 });
 
 app.listen(PORT, () => {
